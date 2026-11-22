@@ -71,6 +71,7 @@ import { useWorkingDirectoryActions } from "../../ui/working-directory-actions"
 import { truncateFilePath } from "../../ui/file-path"
 import { PromptMetadataRow } from "./metadata"
 import { limitLabel, useUsageLimits } from "../usage"
+import { createSuggestion, latestReply } from "./suggestion"
 
 export type PromptProps = {
   sessionID?: string
@@ -256,6 +257,36 @@ export function Prompt(props: PromptProps) {
   })
   const editorContextLabelState = createMemo(() => editor.labelState())
   const [auto, setAuto] = createSignal<AutocompleteRef>()
+  const suggestionExchange = createMemo(
+    () => {
+      const sessionID = props.sessionID
+      if (config.experimental?.["prompt-suggestions"] === false || !sessionID) return
+      if (disabled() || props.visible === false || status() !== "idle") return
+      const session = data.session.get(sessionID)
+      if (!session || session.revert || data.session.pending.list(sessionID).length) return
+      if (data.session.permission.list(sessionID)?.length || data.session.form.list(sessionID)?.length) return
+      const console = data.location.integration.list(session.location)?.find((item) => item.id === "opencode")
+      if (!console?.connections.length) return
+      const replyID = latestReply(data.session.message.list(sessionID))
+      if (replyID)
+        return {
+          sessionID,
+          replyID,
+          directory: session.location.directory,
+          includeHistory:
+            terminalEnvironment.localServer === true && config.experimental?.["prompt-suggestion-history"] !== false,
+        }
+    },
+    undefined,
+    {
+      equals: (previous, next) =>
+        previous?.sessionID === next?.sessionID &&
+        previous?.replyID === next?.replyID &&
+        previous?.directory === next?.directory &&
+        previous?.includeHistory === next?.includeHistory,
+    },
+  )
+  const suggestedPrompt = createSuggestion(client.api, suggestionExchange)
   const move = usePromptMove({
     projectID: () =>
       (props.sessionID ? data.session.get(props.sessionID)?.projectID : undefined) ?? data.location.info()?.project.id,
@@ -965,6 +996,29 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  const suggestion = () => {
+    if (disabled() || dialog.stack.length > 0 || store.mode !== "normal" || auto()?.visible) return
+    if (store.prompt.text !== "" || store.prompt.files?.length) return
+    return suggestedPrompt()
+  }
+  Keymap.createLayer(() => ({
+    target: inputTarget,
+    enabled: !!suggestion(),
+    commands: [
+      {
+        bind: "tab,right",
+        title: "Accept prompt suggestion",
+        group: "Prompt",
+        run: () => {
+          const text = suggestion()
+          if (!text || !input.focused) return false
+          input.insertText(text)
+          input.gotoBufferEnd()
+        },
+      },
+    ],
+  }))
+
   Keymap.createLayer(() => {
     return {
       target: inputTarget,
@@ -1617,6 +1671,8 @@ export function Prompt(props: PromptProps) {
 
   const placeholderText = createMemo(() => {
     const value = (() => {
+      const suggested = suggestion()
+      if (suggested) return suggested
       if (store.mode === "shell") {
         if (!shell().length) return undefined
         return `Run a command… "${shell()[store.placeholder % shell().length]}"`

@@ -1,0 +1,20 @@
+{
+  "name": "@opencode/prompt-suggestions",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "bun script/demo.ts",
+    "test": "bun test",
+    "typecheck": "bun check --no-script",
+    "typecheck:tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode/schema": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@tsconfig/bun": "catalog:",
+    "@typescript/native": "catalog:"
+  }
+}
