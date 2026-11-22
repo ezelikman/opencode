@@ -1664,7 +1664,7 @@ export function Prompt(props: PromptProps) {
   const placeholderText = createMemo(() => {
     const value = (() => {
       const suggested = suggestion()
-      if (suggested) return `[Tab/Right] ${suggested}`
+      if (suggested) return suggested
       if (store.mode === "shell") {
         if (!shell().length) return undefined
         return `Run a command… "${shell()[store.placeholder % shell().length]}"`

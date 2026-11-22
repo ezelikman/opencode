@@ -1,3 +1,4 @@
+import { TextareaRenderable } from "@opentui/core"
 import { expect, test } from "bun:test"
 import { createAppFixture } from "./fixture/app"
 import { directory, json } from "./fixture/tui-client"
@@ -92,7 +93,11 @@ test.each(["tab", "right"])("%s accepts a full-conversation suggestion into the 
     data: {},
   })
   await generated.promise
-  await setup.waitForFrame((frame) => frame.includes("[Tab/Right] " + suggestion))
+  await setup.waitForFrame((frame) => frame.includes(suggestion))
+  const editor = setup.renderer.currentFocusedEditor
+  if (!(editor instanceof TextareaRenderable)) throw new Error("expected the focused prompt textarea")
+  expect(editor.placeholder).toBe(suggestion)
+  expect(editor.plainText).toBe("")
   expect(requests).toHaveLength(1)
   expect(requests[0]).toEqual({
     input: {
@@ -107,7 +112,7 @@ test.each(["tab", "right"])("%s accepts a full-conversation suggestion into the 
 
   if (key === "tab") setup.mockInput.pressTab()
   else setup.mockInput.pressArrow("right")
-  await setup.waitForFrame((frame) => frame.includes(suggestion) && !frame.includes("[Tab/Right] " + suggestion))
+  await setup.waitFor(() => editor.plainText === suggestion)
   expect(submitted).toBe(0)
   expect(codingCalls).toBe(0)
 })
