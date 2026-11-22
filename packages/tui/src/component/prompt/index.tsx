@@ -998,7 +998,7 @@ export function Prompt(props: PromptProps) {
     enabled: !!suggestion(),
     commands: [
       {
-        bind: "right",
+        bind: "tab,right",
         title: "Accept prompt suggestion",
         group: "Prompt",
         run: () => {
@@ -1664,7 +1664,7 @@ export function Prompt(props: PromptProps) {
   const placeholderText = createMemo(() => {
     const value = (() => {
       const suggested = suggestion()
-      if (suggested) return `[Right] ${suggested}`
+      if (suggested) return `[Tab/Right] ${suggested}`
       if (store.mode === "shell") {
         if (!shell().length) return undefined
         return `Run a command… "${shell()[store.placeholder % shell().length]}"`

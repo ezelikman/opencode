@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { createAppFixture } from "./fixture/app"
 import { directory, json } from "./fixture/tui-client"
 
-test("offers a Console suggestion from the full conversation and inserts it without submitting", async () => {
+test.each(["tab", "right"])("%s accepts a full-conversation suggestion into the draft", async (key) => {
   const location = { directory, project: { id: "proj_test", directory, canonical: directory } }
   const session = {
     id: "ses_" + crypto.randomUUID(),
@@ -92,7 +92,7 @@ test("offers a Console suggestion from the full conversation and inserts it with
     data: {},
   })
   await generated.promise
-  await setup.waitForFrame((frame) => frame.includes("[Right] " + suggestion))
+  await setup.waitForFrame((frame) => frame.includes("[Tab/Right] " + suggestion))
   expect(requests).toHaveLength(1)
   expect(requests[0]).toEqual({
     input: {
@@ -105,8 +105,9 @@ test("offers a Console suggestion from the full conversation and inserts it with
     },
   })
 
-  setup.mockInput.pressArrow("right")
-  await setup.waitForFrame((frame) => frame.includes(suggestion) && !frame.includes("[Right] " + suggestion))
+  if (key === "tab") setup.mockInput.pressTab()
+  else setup.mockInput.pressArrow("right")
+  await setup.waitForFrame((frame) => frame.includes(suggestion) && !frame.includes("[Tab/Right] " + suggestion))
   expect(submitted).toBe(0)
   expect(codingCalls).toBe(0)
 })

@@ -1,6 +1,6 @@
 # Console prompt suggestions
 
-This handler predicts the user's next OpenCode prompt from the visible user and assistant turns in the current session. Right Arrow accepts the suggestion into the draft. The coding model continues to handle submitted prompts.
+This handler predicts the user's next OpenCode prompt from the visible user and assistant turns in the current session. Tab or Right Arrow accepts the suggestion into the draft. The coding model continues to handle submitted prompts.
 
 ## Run the live demo
 
@@ -10,7 +10,7 @@ From a checkout with the workspace dependencies installed, run the following in 
 bun run --cwd services/prompt-suggestions demo /path/to/persimmon-key
 ```
 
-The demo starts a loopback Console, imports a synthetic four-message session into a temporary OpenCode profile, and opens the fork's TUI. The Console holds the Persimmon key and makes a billed standard-tier request. After the last reply, look for `[Right]` in the prompt and press Right Arrow to edit the suggestion. A model can abstain. Exit OpenCode to close the server and remove the demo profile.
+The demo starts a loopback Console, imports a synthetic four-message session into a temporary OpenCode profile, and opens the fork's TUI. The Console holds the Persimmon key and makes a billed standard-tier request. After the last reply, look for `[Tab/Right]` in the prompt and press either key to edit the suggestion. A model can abstain. Exit OpenCode to close the server and remove the demo profile.
 
 ## Mount in Console
 
