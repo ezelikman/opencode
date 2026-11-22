@@ -13,22 +13,20 @@ export function suggestionText(value: string | null) {
   return text
 }
 
-export const maxPriorPrompts = 50
-export const maxPromptLength = 512
+export const maxPriorChats = 8
+export const maxPriorMessages = 64
+export const maxChatLength = 8192
 
-const priorPrompts = Schema.Array(
-  Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(maxPromptLength))).check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(maxPriorPrompts),
-  ),
-).check(
-  Schema.isMaxLength(maxPriorPrompts),
-  Schema.makeFilter((groups) => groups.reduce((count, group) => count + group.length, 0) <= maxPriorPrompts),
+export const Turn = Schema.Struct({ name: Schema.Literals(["User", "Coding assistant"]), content: Schema.String })
+const priorChat = Schema.Array(Turn).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(maxPriorMessages),
+  Schema.makeFilter((turns) => turns.reduce((size, turn) => size + turn.content.length, 0) <= maxChatLength),
 )
 
 export const Request = Schema.Struct({
-  priorPrompts: Schema.optionalKey(priorPrompts),
-  turns: Schema.Array(Schema.Struct({ name: Schema.Literals(["User", "Coding assistant"]), content: Schema.String })),
+  priorConversations: Schema.optionalKey(Schema.Array(priorChat).check(Schema.isMaxLength(maxPriorChats))),
+  turns: Schema.Array(Turn),
 })
 export const Response = Schema.Struct({ text: Schema.NullOr(Schema.String) })
 

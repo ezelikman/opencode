@@ -28,16 +28,27 @@ test("authorizes first and rejects invalid input before contacting Persimmon", a
     null,
     { turns: [] },
     { turns: [{ name: "Tool", content: "output" }] },
-    { ...transcript, priorPrompts: [["x".repeat(513)]] },
-    { ...transcript, priorPrompts: [Array(51).fill("a")] },
-    { ...transcript, priorPrompts: [Array(25).fill("a"), Array(26).fill("b")] },
-    { ...transcript, priorPrompts: [[]] },
+    { ...transcript, priorConversations: [[{ name: "OpenCode", content: "Current chat" }]] },
+    { ...transcript, priorConversations: [[{ name: "User", content: "x".repeat(8193) }]] },
+    { ...transcript, priorConversations: [Array(65).fill(transcript.turns[0])] },
+    { ...transcript, priorConversations: Array(9).fill(transcript.turns) },
+    { ...transcript, priorConversations: [[]] },
   ])
     expect((await route(request(input))).status).toBe(400)
 })
 
 test("sends all turns in order and requests only the user's next turn", async () => {
   const prefix = "a".repeat(65_535) + "🙂"
+  const priorConversations = [
+    [
+      { name: "User", content: "How did the docs review go?" },
+      { name: "Coding assistant", content: "One typo." },
+    ],
+    [
+      { name: "User", content: "Can we preview it?" },
+      { name: "Coding assistant", content: "Here is the diff." },
+    ],
+  ] as const
   const seen: string[] = []
   const route = promptSuggestions({
     apiKey: "service-key",
@@ -51,7 +62,11 @@ test("sends all turns in order and requests only the user's next turn", async ()
       expect(init.redirect).toBe("error")
       expect(JSON.parse(String(init.body))).toEqual({
         turns: [
-          { name: "Earlier conversations", content: JSON.stringify([["Use dry runs."], ["Ask before committing."]]) },
+          { name: "OpenCode", content: "Earlier chat" },
+          ...priorConversations[0],
+          { name: "OpenCode", content: "Earlier chat" },
+          ...priorConversations[1],
+          { name: "OpenCode", content: "Current chat" },
           { name: "User", content: prefix },
           { name: "User", content: "tail" },
           ...transcript.turns,
@@ -66,7 +81,7 @@ test("sends all turns in order and requests only the user's next turn", async ()
   const result = await route(
     request({
       turns: [{ name: "User", content: prefix + "tail" }, ...transcript.turns],
-      priorPrompts: [["Use dry runs."], ["Ask before committing."]],
+      priorConversations,
     }),
   )
   expect(result.status).toBe(200)
@@ -75,29 +90,17 @@ test("sends all turns in order and requests only the user's next turn", async ()
   expect(seen).toEqual(["Bearer console-token", "https://api.persimmon.humansand.ai/v1/conversations/definition/turns"])
 })
 
-test("forwards 50 prompts across any mix of chats within the Persimmon turn limit", async () => {
-  const prompts = Array.from({ length: 50 }, (_, i) => String(i).padEnd(512, "\u0001"))
-  for (const priorPrompts of [[prompts], prompts.map((text) => [text])]) {
-    const route = promptSuggestions({
-      apiKey: "service-key",
-      definitionID: "definition",
-      authorize: () => undefined,
-      fetch: async (_, init) => {
-        const { turns } = JSON.parse(String(init.body))
-        const earlier = turns.slice(0, -1)
-        expect(earlier.length).toBeGreaterThan(1)
-        expect(
-          earlier.every(
-            (t: { name: string; content: string }) => t.name === "Earlier conversations" && t.content.length <= 65_536,
-          ),
-        ).toBe(true)
-        expect(JSON.parse(earlier.map((t: { content: string }) => t.content).join(""))).toEqual(priorPrompts)
-        expect(turns.at(-1)).toEqual(transcript.turns[0])
-        return Response.json({ finish_reason: "stop", content: "Yes" })
-      },
-    })
-    expect((await route(request({ ...transcript, priorPrompts }))).status).toBe(200)
-  }
+test("sends the active chat alone when no prior conversation is available", async () => {
+  const route = promptSuggestions({
+    apiKey: "service-key",
+    definitionID: "definition",
+    authorize: () => undefined,
+    fetch: async (_, init) => {
+      expect(JSON.parse(String(init.body)).turns).toEqual(transcript.turns)
+      return Response.json({ finish_reason: "stop", content: "Yes" })
+    },
+  })
+  expect((await route(request(transcript))).status).toBe(200)
 })
 
 test("handles abstention, truncated output, and upstream errors without exposing upstream bodies", async () => {

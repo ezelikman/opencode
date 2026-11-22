@@ -1,7 +1,6 @@
 import type { OpenCodeClient, SessionMessageInfo } from "@opencode/client"
 import { PromptSuggestions } from "@opencode/schema/prompt-suggestions"
 import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js"
-import { useHistoryEntries, type PromptInfo } from "../../prompt/history"
 
 type Exchange = { sessionID: string; replyID: string; directory: string; includeHistory: boolean }
 
@@ -27,27 +26,20 @@ export function latestReply(messages: readonly SessionMessageInfo[]) {
 }
 
 export function createSuggestion(client: OpenCodeClient, exchange: Accessor<Exchange | undefined>) {
-  const history = useHistoryEntries()
   const [result, setResult] = createSignal<{ exchange: Exchange; text?: string }>()
   createEffect(
-    on(
-      () => {
-        const current = exchange()
-        return current?.includeHistory && !history.loaded() ? undefined : current
-      },
-      (current) => {
-        if (!current || sameExchange(result()?.exchange, current)) return
-        const abort = new AbortController()
-        onCleanup(() => abort.abort())
-        const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(20_000)])
-        void predict(client, current, history.entries, signal)
-          .catch(() => undefined)
-          .then((text) => {
-            if (abort.signal.aborted) return
-            setResult({ exchange: current, text })
-          })
-      },
-    ),
+    on(exchange, (current) => {
+      if (!current || sameExchange(result()?.exchange, current)) return
+      const abort = new AbortController()
+      onCleanup(() => abort.abort())
+      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(20_000)])
+      void predict(client, current, signal)
+        .catch(() => undefined)
+        .then((text) => {
+          if (abort.signal.aborted) return
+          setResult({ exchange: current, text })
+        })
+    }),
   )
   return () => {
     const suggestion = result()
@@ -55,30 +47,34 @@ export function createSuggestion(client: OpenCodeClient, exchange: Accessor<Exch
   }
 }
 
-async function predict(
-  client: OpenCodeClient,
-  exchange: Exchange,
-  history: readonly PromptInfo[],
-  signal: AbortSignal,
-) {
+async function predict(client: OpenCodeClient, exchange: Exchange, signal: AbortSignal) {
   const rpc = client.rpc(PromptSuggestions.Definition)
   const options = { location: { directory: exchange.directory }, signal }
   if (!(await rpc.available({}, options))) return
 
-  const [messages, priorPrompts] = await Promise.all([
+  const [messages, priorConversations] = await Promise.all([
     readTranscript(client, exchange.sessionID, signal),
-    exchange.includeHistory ? readPriorPrompts(client, exchange.sessionID, history, signal).catch(() => []) : [],
+    exchange.includeHistory ? readPriorConversations(client, exchange.sessionID, signal).catch(() => []) : [],
   ])
   if (latestReply(messages) !== exchange.replyID) return
 
-  const turns = messages.flatMap<(typeof PromptSuggestions.Request.Type)["turns"][number]>((message) => {
+  const result = await rpc.predict(
+    {
+      turns: visibleTurns(messages),
+      ...(priorConversations.length ? { priorConversations } : {}),
+    },
+    options,
+  )
+  return PromptSuggestions.suggestionText(result.text) ?? undefined
+}
+
+function visibleTurns(messages: readonly SessionMessageInfo[]) {
+  return messages.flatMap<typeof PromptSuggestions.Turn.Type>((message) => {
     if (message.type === "user" && message.text.trim()) return [{ name: "User", content: message.text }]
     if (message.type !== "assistant") return []
     const content = message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
     return content.trim() ? [{ name: "Coding assistant", content }] : []
   })
-  const result = await rpc.predict({ turns, ...(priorPrompts.length ? { priorPrompts } : {}) }, options)
-  return PromptSuggestions.suggestionText(result.text) ?? undefined
 }
 
 async function readTranscript(client: OpenCodeClient, sessionID: string, signal: AbortSignal) {
@@ -95,61 +91,33 @@ async function readTranscript(client: OpenCodeClient, sessionID: string, signal:
   return messages
 }
 
-async function readPriorPrompts(
-  client: OpenCodeClient,
-  sessionID: string,
-  history: readonly PromptInfo[],
-  parentSignal: AbortSignal,
-) {
-  // Recall history also includes cleared drafts and shell commands. Require a matching user message in another chat.
-  const local = new Set(
-    history
-      .slice(-PromptSuggestions.maxPriorPrompts)
-      .filter(
-        (item) =>
-          item.mode === "normal" &&
-          item.text.trim() &&
-          item.text.length <= PromptSuggestions.maxPromptLength &&
-          !item.pasted.length &&
-          !item.files?.length &&
-          !item.text.trimStart().startsWith("/"),
-      )
-      .map((item) => item.text),
-  )
-  if (!local.size) return []
+async function readPriorConversations(client: OpenCodeClient, sessionID: string, parentSignal: AbortSignal) {
   const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(1500)])
-  const recent = await client.session.list(
-    {
-      order: "desc",
-      archived: false,
-      parentID: null,
-      limit: PromptSuggestions.maxPriorPrompts + 1,
-    },
-    { signal },
+  const recent = await client.session.list({ order: "desc", archived: false, parentID: null, limit: 50 }, { signal })
+  const sessions = recent.data
+    .filter((s) => s.id !== sessionID && !s.parentID && !s.fork && !s.revert && s.time.archived === undefined)
+    .slice(0, PromptSuggestions.maxPriorChats)
+  const chats = await Promise.all(
+    sessions.map(async (session) => {
+      const page = await client.message
+        .list({ sessionID: session.id, order: "desc", limit: PromptSuggestions.maxPriorMessages }, { signal })
+        .catch(() => undefined)
+      if (!page) return []
+      const excerpt: (typeof PromptSuggestions.Turn.Type)[] = []
+      let remaining = PromptSuggestions.maxChatLength
+      for (const turn of visibleTurns(page.data)) {
+        if (!remaining) break
+        // Leave room for the other side of the exchange even when one reply is very long.
+        const limit = Math.min(remaining, PromptSuggestions.maxChatLength / 2)
+        const content =
+          turn.content.length <= limit
+            ? turn.content
+            : turn.content.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/u, "") + "…"
+        excerpt.push({ name: turn.name, content })
+        remaining -= content.length
+      }
+      return excerpt.reverse()
+    }),
   )
-  const sessions = recent.data.filter(
-    (s) => s.id !== sessionID && !s.parentID && !s.fork && !s.revert && s.time.archived === undefined,
-  )
-  const groups: string[][] = []
-  // Read in bounded batches so a large profile does not fan out a request for every chat at once.
-  const batchSize = 6
-  for (let i = 0; i < sessions.length && local.size && !signal.aborted; i += batchSize) {
-    const pages = await Promise.all(
-      sessions
-        .slice(i, i + batchSize)
-        .map((session) =>
-          client.message
-            .list(
-              { sessionID: session.id, type: "user", order: "desc", limit: PromptSuggestions.maxPriorPrompts },
-              { signal },
-            )
-            .catch(() => undefined),
-        ),
-    )
-    for (const page of pages) {
-      const group = page?.data.flatMap((m) => (m.type === "user" && local.delete(m.text) ? [m.text] : []))
-      if (group?.length) groups.push(group.reverse())
-    }
-  }
-  return groups.reverse()
+  return chats.filter((chat) => chat.length).reverse()
 }

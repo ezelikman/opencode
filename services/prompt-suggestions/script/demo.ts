@@ -111,26 +111,35 @@ try {
       time: { created: 4, completed: 4 },
     },
   ]
-  const previous = ["quick version pls, how did the docs review go?", "Show me a dry run before changing files."]
+  const previous = [
+    ["quick version pls, how did the docs review go?", "The setup example needs one correction."],
+    ["Show me a dry run before changing files.", "The dry run found two files to update."],
+  ]
   const otherProject = path.join(root, "docs-project")
   await Bun.$`git init --quiet ${otherProject}`
   await Bun.$`git -C ${otherProject} remote add origin https://example.invalid/demo/docs.git`
-  for (const [index, text] of previous.entries()) {
+  for (const [index, [text, reply]] of previous.entries()) {
     const directory = index === 0 ? otherProject : root
     const id = "ses_demo_prior_" + index
     await Bun.write(
       sessionFile,
       JSON.stringify({
         info: { ...info, id, location: { directory }, title: "Previous chat" },
-        messages: [{ id: "msg_demo_prior_" + index, type: "user", text, time: { created: 1 } }],
+        messages: [
+          { id: "msg_demo_prior_user_" + index, type: "user", text, time: { created: 1 } },
+          {
+            id: "msg_demo_prior_reply_" + index,
+            type: "assistant",
+            agent: "build",
+            model,
+            content: [{ type: "text", text: reply }],
+            time: { created: 2, completed: 2 },
+          },
+        ],
       }),
     )
     await run(["session", "import", sessionFile, "--directory", directory])
   }
-  await Bun.write(
-    path.join(root, "opencode", "prompt-history.jsonl"),
-    previous.map((text) => JSON.stringify({ text, mode: "normal", pasted: [] })).join("\n") + "\n",
-  )
   await Bun.write(sessionFile, JSON.stringify({ info, messages }))
   await run(["session", "import", sessionFile, "--directory", root])
   await run([root, "--session", sessionID])

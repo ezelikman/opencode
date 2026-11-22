@@ -2,9 +2,17 @@
 
 This handler predicts the user's next OpenCode prompt from the visible user and assistant turns in the current session. Tab or Right Arrow accepts the suggestion into the draft. The coding model continues to handle submitted prompts.
 
-With a locally managed OpenCode server, suggestions can use up to 50 distinct prompts across projects in the local profile. The prompts can come from one chat or many. OpenCode starts with the TUI’s 50-entry recall history and matches plain, submitted user messages of up to 512 UTF-16 code units each. It searches the 51 most recently updated, unarchived top-level chats and checks up to 50 recent user messages per eligible chat. OpenCode skips the active chat, forks, and reverted chats. The lookup has a 1.5-second deadline and uses any matches found by then. Persimmon receives these examples grouped by conversation and uses them for the user’s writing style. The active conversation supplies the task and its facts.
+With a locally managed OpenCode server, suggestions include recent conversations stored in the local profile across projects. OpenCode reads the visible user messages and assistant replies directly from session history. Each excerpt keeps its original speakers and message order. Tool output, hidden reasoning, attachment payloads, and system messages are excluded.
+
+OpenCode selects up to eight earlier top-level chats from the 50 most recently updated unarchived sessions, skipping forks and reverted chats. It reads the latest 64 messages per selected chat, with a 1.5-second deadline for local history reads. The newest visible turns take priority within an 8,192 UTF-16 code unit budget per chat. A single historical message can use up to half that budget. These limits apply only to earlier chats. Console sends the complete visible active transcript. Persimmon manages long histories within its documented 16,384-token model context. [Persimmon API limits](https://persimmon.humansand.ai/docs)
 
 Turn off **Use prior chats for suggestions** in Experiments to use just the current conversation. Explicit server connections also use just the current conversation. If earlier chats are unavailable, autocomplete can still use the active chat.
+
+## How Persimmon receives the conversation
+
+The definition describes the setting and the participants. For each prediction, Console sends the ordered turns with their original speaker names and explicitly requests the next turn from `User`. The coding assistant and OpenCode supply their own text. The standard tier suits an interactive suggestion because it has lower latency than the higher-compute tiers. [Persimmon REST API](https://persimmon.humansand.ai/docs) · [Official SDK guide and tier notes](https://pypi.org/project/humansand/)
+
+OpenCode adds a marker before each earlier chat and at the start of the current one. This is an application convention. It lets Persimmon see what prompted each earlier response while the current exchange supplies the task. A suggested turn enters conversation history only when the user submits it.
 
 ## Run the live demo
 
@@ -18,7 +26,7 @@ The demo starts a loopback Console, imports two earlier chats across two project
 
 ## Mount in Console
 
-Mount `promptSuggestions({ apiKey, definitionID, authorize })` from `src/route.ts` at `POST /api/v2/prompt-suggestions` in the hosted Console router. Supply the service key from Console's secret store. Run `createDefinition(apiKey)` once and save the returned ID in deployment configuration. This definition includes a read-only “Earlier conversations” participant and allows only the User to generate text. When upgrading an existing deployment, provision a new definition ID to pick up the cross-project writing-style instructions. Each prediction supplies its own history.
+Mount `promptSuggestions({ apiKey, definitionID, authorize })` from `src/route.ts` at `POST /api/v2/prompt-suggestions` in the hosted Console router. Supply the service key from Console's secret store. Run `createDefinition(apiKey)` once and save the returned ID in deployment configuration. This definition includes the application-supplied `OpenCode` boundary participant and permits only `User` to generate text. Provision a new definition ID when upgrading from the earlier prompt-only preview. Each prediction supplies its own history.
 
 Use the Console's existing workspace authentication, entitlement and usage controls in `authorize`. Return a denial response or return `undefined` to proceed. Advertise `x-opencode-prompt-suggestions: 1` on the authenticated config response only for eligible workspaces. The fork's loopback server exercises both routes with a temporary workspace credential. Production Console routing and deployment are maintained outside this repository.
 

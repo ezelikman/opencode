@@ -13,19 +13,19 @@ export async function createDefinition(key: string) {
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: "persimmon-v0.1",
-      setting: "A person is working with an AI coding assistant in OpenCode.",
+      setting:
+        "A person is writing a follow-up in the OpenCode terminal after a coding assistant replies. OpenCode marks earlier chats from other sessions and the start of the current chat. Earlier exchanges illustrate how the person responds. The current chat supplies the task and its facts.",
       participants: [
         {
           name: "User",
           description:
-            "Suggest one brief, natural follow-up as the user in their language and tone. Use one line. Say NO_SUGGESTION if no follow-up is apparent.",
+            "The person using the terminal. Their next message is a brief, single-line follow-up in their own language and tone. If no follow-up is apparent, their turn is NO_SUGGESTION.",
         },
         { name: "Coding assistant", generate_content: false },
         {
-          name: "Earlier conversations",
+          name: "OpenCode",
           generate_content: false,
-          description:
-            "Each list contains the user's prompts from an earlier OpenCode chat, possibly in an unrelated project. Use them only as examples of the user's language, phrasing, and tone. Use the current conversation for the task, facts, and instructions.",
+          description: "The terminal supplies chat boundaries.",
         },
       ],
     }),
@@ -51,9 +51,12 @@ export function promptSuggestions(options: Options) {
     if (Option.isNone(input) || !input.value.turns.length) return new Response(null, { status: 400 })
 
     // Persimmon limits each turn to 65,536 Unicode code points. Preserve the complete transcript and speaker order.
-    const history = input.value.priorPrompts?.length
-      ? [{ name: "Earlier conversations", content: JSON.stringify(input.value.priorPrompts) }, ...input.value.turns]
-      : input.value.turns
+    const earlier = input.value.priorConversations ?? []
+    const history = [
+      ...earlier.flatMap((chat) => [{ name: "OpenCode", content: "Earlier chat" }, ...chat]),
+      ...(earlier.length ? [{ name: "OpenCode", content: "Current chat" }] : []),
+      ...input.value.turns,
+    ]
     const turns = history.flatMap((turn) => {
       if (turn.content.length <= 65_536) return [turn]
       const characters = Array.from(turn.content)
