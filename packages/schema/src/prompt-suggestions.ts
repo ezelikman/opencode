@@ -3,6 +3,16 @@ export * as PromptSuggestions from "./prompt-suggestions.js"
 import { Schema } from "effect"
 import { Rpc } from "./rpc.js"
 
+export const path = "/api/v2/prompt-suggestions"
+export const capabilityHeader = "x-opencode-prompt-suggestions"
+
+export function suggestionText(value: string | null) {
+  const text = value?.trim()
+  if (!text || /^NO_SUGGESTION$/i.test(text) || /^[!/]/.test(text)) return null
+  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(text) || Array.from(text).length > 200) return null
+  return text
+}
+
 export const Request = Schema.Struct({
   turns: Schema.Array(Schema.Struct({ name: Schema.Literals(["User", "Coding assistant"]), content: Schema.String })),
 })

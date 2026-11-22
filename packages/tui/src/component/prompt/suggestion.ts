@@ -70,8 +70,5 @@ async function predict(client: OpenCodeClient, exchange: Exchange, signal: Abort
     return content.trim() ? [{ name: "Coding assistant", content }] : []
   })
   const result = await rpc.predict({ turns }, options)
-  const text = result.text?.trim()
-  if (!text || /^NO_SUGGESTION$/i.test(text) || /^[!/]/.test(text)) return
-  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(text) || Array.from(text).length > 200) return
-  return text
+  return PromptSuggestions.suggestionText(result.text) ?? undefined
 }

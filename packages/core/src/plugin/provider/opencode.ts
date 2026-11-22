@@ -69,7 +69,6 @@ const ConsoleInstructions = Schema.Struct({
 })
 /** The `GET /api/v2/config` response header Console sends while the caller has workspace instructions and skills. */
 const listsHeader = "x-opencode-instructions-skills"
-const suggestionsHeader = "x-opencode-prompt-suggestions"
 const ConsoleSkills = Schema.Struct({
   skills: Schema.Array(Schema.Struct({ slug: Schema.String, version: Schema.String })),
 })
@@ -492,7 +491,7 @@ export const OpencodePlugin = define<
             const credential = yield* suggestionCredential()
             if (!credential) return { text: null }
             const server = yield* normalizeServer(ConsoleAccess.server(credential))
-            const request = yield* HttpClientRequest.post(`${server}/api/v2/prompt-suggestions`).pipe(
+            const request = yield* HttpClientRequest.post(`${server}${PromptSuggestions.path}`).pipe(
               HttpClientRequest.acceptJson,
               HttpClientRequest.setHeaders(ConsoleAccess.headers(credential)),
               HttpClientRequest.schemaBodyJson(PromptSuggestions.Request)(input),
@@ -660,7 +659,7 @@ function fetchConfig(http: HttpClient.HttpClient, value: Credential.Key | Creden
           const watches = response.headers[OpencodeWatches.header] !== undefined
           const lists = response.headers[listsHeader] !== undefined
           const artifacts = response.headers[OpencodeArtifacts.header] !== undefined
-          const promptSuggestions = response.headers[suggestionsHeader] === "1"
+          const promptSuggestions = response.headers[PromptSuggestions.capabilityHeader] === "1"
           const body = yield* HttpClientResponse.filterStatusOk(response).pipe(Effect.flatMap((ok) => ok.json))
           return {
             ...(yield* Schema.decodeUnknownEffect(ConfigIntegration.Remote)(body)),

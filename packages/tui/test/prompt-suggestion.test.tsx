@@ -5,7 +5,7 @@ import { directory, json } from "./fixture/tui-client"
 test("offers a Console suggestion from the full conversation and inserts it without submitting", async () => {
   const location = { directory, project: { id: "proj_test", directory, canonical: directory } }
   const session = {
-    id: "ses_suggestion",
+    id: "ses_" + crypto.randomUUID(),
     projectID: "proj_test",
     location: { directory },
     title: "Prompt suggestions",

@@ -935,6 +935,18 @@
         "wrangler": "4.156.2",
       },
     },
+    "services/prompt-suggestions": {
+      "name": "@opencode/prompt-suggestions",
+      "dependencies": {
+        "@opencode/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native": "catalog:",
+      },
+    },
     "services/site": {
       "name": "@opencode/site",
       "dependencies": {
@@ -1888,6 +1900,8 @@
     "@opencode/plugin-browser": ["@opencode/plugin-browser@workspace:packages/plugin-browser"],
 
     "@opencode/plugin-figma": ["@opencode/plugin-figma@workspace:packages/plugins/figma"],
+
+    "@opencode/prompt-suggestions": ["@opencode/prompt-suggestions@workspace:services/prompt-suggestions"],
 
     "@opencode/protocol": ["@opencode/protocol@workspace:packages/protocol"],
 
