@@ -67,7 +67,7 @@ async function predict(
 
   const [messages, priorPrompts] = await Promise.all([
     readTranscript(client, exchange.sessionID, signal),
-    exchange.includeHistory ? readPriorPrompts(client, exchange, history, signal).catch(() => []) : [],
+    exchange.includeHistory ? readPriorPrompts(client, exchange.sessionID, history, signal).catch(() => []) : [],
   ])
   if (latestReply(messages) !== exchange.replyID) return
 
@@ -97,7 +97,7 @@ async function readTranscript(client: OpenCodeClient, sessionID: string, signal:
 
 async function readPriorPrompts(
   client: OpenCodeClient,
-  exchange: Exchange,
+  sessionID: string,
   history: readonly PromptInfo[],
   parentSignal: AbortSignal,
 ) {
@@ -119,7 +119,6 @@ async function readPriorPrompts(
   const signal = AbortSignal.any([parentSignal, AbortSignal.timeout(1500)])
   const recent = await client.session.list(
     {
-      directory: exchange.directory,
       order: "desc",
       archived: false,
       parentID: null,
@@ -127,17 +126,9 @@ async function readPriorPrompts(
     },
     { signal },
   )
-  const sessions = recent.data
-    .filter(
-      (s) =>
-        s.id !== exchange.sessionID &&
-        s.location.directory === exchange.directory &&
-        !s.parentID &&
-        !s.fork &&
-        !s.revert &&
-        s.time.archived === undefined,
-    )
-    .slice(0, PromptSuggestions.maxSessions)
+  const sessions = recent.data.filter(
+    (s) => s.id !== sessionID && !s.parentID && !s.fork && !s.revert && s.time.archived === undefined,
+  )
   const groups = await Promise.all(
     sessions.map(async (session) => {
       const page = await client.message
@@ -149,5 +140,5 @@ async function readPriorPrompts(
       return [...new Set(texts)].slice(0, PromptSuggestions.maxPrompts).reverse()
     }),
   )
-  return groups.filter((group) => group.length).reverse()
+  return groups.filter((group) => group.length).slice(0, PromptSuggestions.maxSessions).reverse()
 }

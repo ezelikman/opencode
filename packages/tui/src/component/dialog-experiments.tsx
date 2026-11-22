@@ -37,7 +37,7 @@ export const experiments: Experiment[] = [
   {
     id: "prompt-suggestion-history",
     title: "Use prior chats for suggestions",
-    description: "Include your recent prompts from other local chats in the same directory",
+    description: "Use recent prompts across your local OpenCode projects as writing-style examples",
     default: true,
   },
 ]

@@ -6,7 +6,7 @@ import { tmpdir } from "./fixture/fixture"
 import { directory, json } from "./fixture/tui-client"
 
 test.each([
-  { name: "local history", key: "tab", local: true, enabled: true },
+  { name: "cross-project local history", key: "tab", local: true, enabled: true },
   { name: "remote server", key: "right", local: false, enabled: true },
   { name: "disabled history", key: "tab", local: true, enabled: false },
 ])("$name accepts a suggestion with $key", async ({ key, local, enabled }) => {
@@ -63,21 +63,26 @@ test.each([
     fetch: async (url, request) => {
       if (url.pathname === "/api/session" && url.searchParams.get("limit") === "12") {
         historyReads.push("list")
-        expect(url.searchParams.get("directory")).toBe(directory)
+        expect(url.searchParams.has("directory")).toBe(false)
+        expect(url.searchParams.has("project")).toBe(false)
         return json({
           data: [
             session,
-            { ...session, id: "ses_foreign", location: { directory: "/other" } },
+            { ...session, id: "ses_unmatched" },
+            { ...session, id: "ses_empty" },
             {
               ...session,
               id: "ses_fork",
               fork: { sessionID: session.id, boundary: { type: "through", messageID: "msg_1" } },
             },
-            { ...session, id: "ses_newer" },
+            { ...session, id: "ses_newer", projectID: "proj_other", location: { directory: "/other-project" } },
             { ...session, id: "ses_older" },
           ],
           cursor: {},
         })
+      }
+      if (["/api/session/ses_unmatched/message", "/api/session/ses_empty/message"].includes(url.pathname)) {
+        return json({ data: [user("msg_other", "An unrelated project detail")], cursor: {} })
       }
       if (url.pathname === "/api/session/ses_newer/message" || url.pathname === "/api/session/ses_older/message") {
         historyReads.push(url.pathname)

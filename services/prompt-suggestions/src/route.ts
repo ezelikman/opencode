@@ -25,7 +25,7 @@ export async function createDefinition(key: string) {
           name: "Earlier conversations",
           generate_content: false,
           description:
-            "Each list contains the person's prompts from one separate earlier chat. Use them as examples of phrasing and preferences. The following live conversation determines the next reply.",
+            "Each list contains the user's prompts from an earlier OpenCode chat, possibly in an unrelated project. Use them only as examples of the user's language, phrasing, and tone. Use the current conversation for the task, facts, and instructions.",
         },
       ],
     }),
