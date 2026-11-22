@@ -51,7 +51,10 @@ export function promptSuggestions(options: Options) {
     if (Option.isNone(input) || !input.value.turns.length) return new Response(null, { status: 400 })
 
     // Persimmon limits each turn to 65,536 Unicode code points. Preserve the complete transcript and speaker order.
-    const turns = input.value.turns.flatMap((turn) => {
+    const history = input.value.priorPrompts?.length
+      ? [{ name: "Earlier conversations", content: JSON.stringify(input.value.priorPrompts) }, ...input.value.turns]
+      : input.value.turns
+    const turns = history.flatMap((turn) => {
       if (turn.content.length <= 65_536) return [turn]
       const characters = Array.from(turn.content)
       return Array.from({ length: Math.ceil(characters.length / 65_536) }, (_, i) => ({
@@ -65,9 +68,7 @@ export function promptSuggestions(options: Options) {
         method: "POST",
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
-          turns: input.value.priorPrompts?.length
-            ? [{ name: "Earlier conversations", content: JSON.stringify(input.value.priorPrompts) }, ...turns]
-            : turns,
+          turns,
           speaker: "User",
           tier: "standard",
           max_tokens: 96,

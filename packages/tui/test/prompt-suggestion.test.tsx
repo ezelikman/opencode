@@ -34,12 +34,20 @@ test.each([
   })
   const first = [user("msg_1", "Use a dry run"), reply("msg_2", "I will use one")]
   const recent = [user("msg_3", "What is next?"), reply("msg_4", "Should I run the checks?")]
-  const prior = ["Show the diff before committing.", "Prefer the smallest patch."]
+  const prior = Array.from({ length: 4 }, (_, chat) =>
+    Array.from({ length: 12 }, (_, turn) => `Show me change ${turn} in project ${chat}.`),
+  )
+  const chats = prior.map((_, i) => ({
+    ...session,
+    id: "ses_prior_" + i,
+    projectID: "proj_" + i,
+    location: { directory: "/project-" + i },
+  }))
   await using state = await tmpdir()
   await Bun.write(
     path.join(state.path, "prompt-history.jsonl"),
     [
-      ...prior.map((text) => ({ text, mode: "normal", pasted: [] })),
+      ...prior.flat().map((text) => ({ text, mode: "normal", pasted: [] })),
       { text: "a shell command", mode: "shell", pasted: [] },
       { text: "an unsent draft", mode: "normal", pasted: [] },
     ]
@@ -61,7 +69,7 @@ test.each([
     args: { sessionID: session.id },
     config: { animations: false, tabs: { mode: "off" }, experimental: { "prompt-suggestion-history": enabled } },
     fetch: async (url, request) => {
-      if (url.pathname === "/api/session" && url.searchParams.get("limit") === "12") {
+      if (url.pathname === "/api/session" && url.searchParams.get("limit") === "51") {
         historyReads.push("list")
         expect(url.searchParams.has("directory")).toBe(false)
         expect(url.searchParams.has("project")).toBe(false)
@@ -75,8 +83,7 @@ test.each([
               id: "ses_fork",
               fork: { sessionID: session.id, boundary: { type: "through", messageID: "msg_1" } },
             },
-            { ...session, id: "ses_newer", projectID: "proj_other", location: { directory: "/other-project" } },
-            { ...session, id: "ses_older" },
+            ...chats.toReversed(),
           ],
           cursor: {},
         })
@@ -84,12 +91,14 @@ test.each([
       if (["/api/session/ses_unmatched/message", "/api/session/ses_empty/message"].includes(url.pathname)) {
         return json({ data: [user("msg_other", "An unrelated project detail")], cursor: {} })
       }
-      if (url.pathname === "/api/session/ses_newer/message" || url.pathname === "/api/session/ses_older/message") {
+      const chat = chats.findIndex((s) => url.pathname === `/api/session/${s.id}/message`)
+      if (chat >= 0) {
         historyReads.push(url.pathname)
         expect(url.searchParams.get("type")).toBe("user")
         return json({
           data: [
-            user("msg_prior", prior[url.pathname.includes("newer") ? 1 : 0]),
+            ...prior[chat].toReversed().map((text, i) => user("msg_prior_" + i, text)),
+            user("msg_duplicate", prior[3][0]),
             user("msg_shell", "a shell command"),
             user("msg_unknown", "Someone else's prompt"),
           ],
@@ -155,12 +164,12 @@ test.each([
   expect(editor.placeholder).toBe(suggestion)
   expect(editor.plainText).toBe("")
   expect(historyReads.toSorted()).toEqual(
-    local && enabled ? ["/api/session/ses_newer/message", "/api/session/ses_older/message", "list"] : [],
+    local && enabled ? [...chats.map((s) => `/api/session/${s.id}/message`), "list"] : [],
   )
   expect(requests).toHaveLength(1)
   expect(requests[0]).toEqual({
     input: {
-      ...(local && enabled ? { priorPrompts: prior.map((text) => [text]) } : {}),
+      ...(local && enabled ? { priorPrompts: prior } : {}),
       turns: [
         { name: "User", content: "Use a dry run" },
         { name: "Coding assistant", content: "I will use one" },

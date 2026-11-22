@@ -29,8 +29,9 @@ test("authorizes first and rejects invalid input before contacting Persimmon", a
     { turns: [] },
     { turns: [{ name: "Tool", content: "output" }] },
     { ...transcript, priorPrompts: [["x".repeat(513)]] },
-    { ...transcript, priorPrompts: [["a", "b", "c", "d"]] },
-    { ...transcript, priorPrompts: [["a"], ["b"], ["c"], ["d"]] },
+    { ...transcript, priorPrompts: [Array(51).fill("a")] },
+    { ...transcript, priorPrompts: [Array(25).fill("a"), Array(26).fill("b")] },
+    { ...transcript, priorPrompts: [[]] },
   ])
     expect((await route(request(input))).status).toBe(400)
 })
@@ -72,6 +73,31 @@ test("sends all turns in order and requests only the user's next turn", async ()
   expect(result.headers.get("cache-control")).toBe("no-store")
   expect(await result.json()).toEqual({ text: "Yes, please." })
   expect(seen).toEqual(["Bearer console-token", "https://api.persimmon.humansand.ai/v1/conversations/definition/turns"])
+})
+
+test("forwards 50 prompts across any mix of chats within the Persimmon turn limit", async () => {
+  const prompts = Array.from({ length: 50 }, (_, i) => String(i).padEnd(512, "\u0001"))
+  for (const priorPrompts of [[prompts], prompts.map((text) => [text])]) {
+    const route = promptSuggestions({
+      apiKey: "service-key",
+      definitionID: "definition",
+      authorize: () => undefined,
+      fetch: async (_, init) => {
+        const { turns } = JSON.parse(String(init.body))
+        const earlier = turns.slice(0, -1)
+        expect(earlier.length).toBeGreaterThan(1)
+        expect(
+          earlier.every(
+            (t: { name: string; content: string }) => t.name === "Earlier conversations" && t.content.length <= 65_536,
+          ),
+        ).toBe(true)
+        expect(JSON.parse(earlier.map((t: { content: string }) => t.content).join(""))).toEqual(priorPrompts)
+        expect(turns.at(-1)).toEqual(transcript.turns[0])
+        return Response.json({ finish_reason: "stop", content: "Yes" })
+      },
+    })
+    expect((await route(request({ ...transcript, priorPrompts }))).status).toBe(200)
+  }
 })
 
 test("handles abstention, truncated output, and upstream errors without exposing upstream bodies", async () => {

@@ -13,16 +13,18 @@ export function suggestionText(value: string | null) {
   return text
 }
 
-export const maxSessions = 3
-export const maxPrompts = 3
+export const maxPriorPrompts = 50
 export const maxPromptLength = 512
 
 const priorPrompts = Schema.Array(
   Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(maxPromptLength))).check(
     Schema.isMinLength(1),
-    Schema.isMaxLength(maxPrompts),
+    Schema.isMaxLength(maxPriorPrompts),
   ),
-).check(Schema.isMaxLength(maxSessions))
+).check(
+  Schema.isMaxLength(maxPriorPrompts),
+  Schema.makeFilter((groups) => groups.reduce((count, group) => count + group.length, 0) <= maxPriorPrompts),
+)
 
 export const Request = Schema.Struct({
   priorPrompts: Schema.optionalKey(priorPrompts),

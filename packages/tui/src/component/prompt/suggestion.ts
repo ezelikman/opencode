@@ -104,6 +104,7 @@ async function readPriorPrompts(
   // Recall history also includes cleared drafts and shell commands. Require a matching user message in another chat.
   const local = new Set(
     history
+      .slice(-PromptSuggestions.maxPriorPrompts)
       .filter(
         (item) =>
           item.mode === "normal" &&
@@ -122,23 +123,33 @@ async function readPriorPrompts(
       order: "desc",
       archived: false,
       parentID: null,
-      limit: 12,
+      limit: PromptSuggestions.maxPriorPrompts + 1,
     },
     { signal },
   )
   const sessions = recent.data.filter(
     (s) => s.id !== sessionID && !s.parentID && !s.fork && !s.revert && s.time.archived === undefined,
   )
-  const groups = await Promise.all(
-    sessions.map(async (session) => {
-      const page = await client.message
-        .list({ sessionID: session.id, type: "user", order: "desc", limit: 12 }, { signal })
-        .catch(() => undefined)
-      const texts =
-        page?.data.flatMap((message) => (message.type === "user" && local.has(message.text) ? [message.text] : [])) ??
-        []
-      return [...new Set(texts)].slice(0, PromptSuggestions.maxPrompts).reverse()
-    }),
-  )
-  return groups.filter((group) => group.length).slice(0, PromptSuggestions.maxSessions).reverse()
+  const groups: string[][] = []
+  // Read in bounded batches so a large profile does not fan out a request for every chat at once.
+  const batchSize = 6
+  for (let i = 0; i < sessions.length && local.size && !signal.aborted; i += batchSize) {
+    const pages = await Promise.all(
+      sessions
+        .slice(i, i + batchSize)
+        .map((session) =>
+          client.message
+            .list(
+              { sessionID: session.id, type: "user", order: "desc", limit: PromptSuggestions.maxPriorPrompts },
+              { signal },
+            )
+            .catch(() => undefined),
+        ),
+    )
+    for (const page of pages) {
+      const group = page?.data.flatMap((m) => (m.type === "user" && local.delete(m.text) ? [m.text] : []))
+      if (group?.length) groups.push(group.reverse())
+    }
+  }
+  return groups.reverse()
 }
