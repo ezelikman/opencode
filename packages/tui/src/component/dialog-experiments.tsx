@@ -28,6 +28,12 @@ export const experiments: Experiment[] = [
     title: "TUI tools",
     description: "Let the agent open terminals in this TUI (requires server support)",
   },
+  {
+    id: "prompt-suggestions",
+    title: "Prompt suggestions",
+    description: "Use OpenCode Console to suggest a follow-up from the current conversation when available",
+    default: true,
+  },
 ]
 
 export function DialogExperiments() {
