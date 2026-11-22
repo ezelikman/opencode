@@ -3,6 +3,7 @@ import { Duration, Effect, Equal, FiberHandle, Option, Schema, Scope, Semaphore,
 import type { IntegrationOAuthMethodRegistration } from "@opencode/plugin/effect/integration"
 import { define } from "@opencode/plugin/effect/plugin"
 import type { SessionHttpResponse } from "@opencode/plugin/effect/session"
+import { PromptSuggestions } from "@opencode/schema/prompt-suggestions"
 import {
   FetchHttpClient,
   HttpBody,
@@ -68,6 +69,7 @@ const ConsoleInstructions = Schema.Struct({
 })
 /** The `GET /api/v2/config` response header Console sends while the caller has workspace instructions and skills. */
 const listsHeader = "x-opencode-instructions-skills"
+const suggestionsHeader = "x-opencode-prompt-suggestions"
 const ConsoleSkills = Schema.Struct({
   skills: Schema.Array(Schema.Struct({ slug: Schema.String, version: Schema.String })),
 })
@@ -79,6 +81,7 @@ type ConsoleSkill = { readonly skill: Skill.Info; readonly files: Record<string,
 type ConsoleConfig = NonNullable<Effect.Success<ReturnType<typeof fetchConfig>>> & {
   readonly instructions: (typeof ConsoleInstructions.Type)["instructions"]
   readonly skills: (typeof ConsoleSkills.Type)["skills"]
+  readonly workspace: string
 }
 const signedOutMessage = "Reconnect OpenCode Console to continue"
 const ssoMessage = (organization: string | undefined) =>
@@ -219,6 +222,7 @@ export const OpencodePlugin = define<
     const skillDownload = yield* FiberHandle.make<void, never>()
     // Status last reported for the active connection, so inference failures can name the fix.
     let reported: IntegrationConnection.Status | undefined
+    let suggestionsWorkspace: string | undefined
     let explainers: Effect.Success<ReturnType<typeof ctx.session.hook>>[] = []
     const watches = yield* OpencodeWatches.make(ctx, http)
     const artifacts = yield* OpencodeArtifacts.make(ctx, http)
@@ -280,8 +284,8 @@ export const OpencodePlugin = define<
                         ),
                       },
                       { concurrency: 2 },
-                    ).pipe(Effect.map((lists): ConsoleConfig => ({ ...remote, ...lists })))
-                  : Effect.succeed(remote && { ...remote, instructions: [], skills: [] }),
+                    ).pipe(Effect.map((lists): ConsoleConfig => ({ ...remote, ...lists, workspace })))
+                  : Effect.succeed(remote && { ...remote, instructions: [], skills: [], workspace }),
               ),
               Effect.map((remote) => ({
                 remote,
@@ -337,6 +341,7 @@ export const OpencodePlugin = define<
       // skills and event watches too. Config keeps the document it holds when handed a deep-equal one, so compare by
       // content.
       const allowed = document !== undefined && (!config.integration || isDeepStrictEqual(integrated, document))
+      suggestionsWorkspace = allowed && next.remote?.promptSuggestions ? next.remote.workspace : undefined
       yield* syncInstructionsAndSkills(next, allowed)
       const watching = allowed && next.remote?.watches === true && (yield* flags.enabled("console_watches"))
       yield* syncWatches(watching ? next.connection : undefined)
@@ -465,6 +470,48 @@ export const OpencodePlugin = define<
         }),
     })
 
+    const suggestionCredential = Effect.fnUntraced(function* () {
+      const workspace = suggestionsWorkspace
+      if (!workspace || reported) return undefined
+      const active = yield* ctx.integration.connection.active("opencode")
+      if (!active) return undefined
+      const credential = yield* ctx.integration.connection.resolve(active)
+      if (!credential || credential.type === "external") return undefined
+      if (workspace !== suggestionsWorkspace || workspace !== workspaceKey(active, credential)) return undefined
+      return credential
+    })
+    yield* ctx.rpc
+      .register(PromptSuggestions.Definition, {
+        available: () =>
+          suggestionCredential().pipe(
+            Effect.map(Boolean),
+            Effect.orElseSucceed(() => false),
+          ),
+        predict: (input) =>
+          Effect.gen(function* () {
+            const credential = yield* suggestionCredential()
+            if (!credential) return { text: null }
+            const server = yield* normalizeServer(ConsoleAccess.server(credential))
+            const request = yield* HttpClientRequest.post(`${server}/api/v2/prompt-suggestions`).pipe(
+              HttpClientRequest.acceptJson,
+              HttpClientRequest.setHeaders(ConsoleAccess.headers(credential)),
+              HttpClientRequest.schemaBodyJson(PromptSuggestions.Request)(input),
+            )
+            return yield* HttpClient.withScope(http)
+              .execute(request)
+              .pipe(
+                Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+                Effect.flatMap(HttpClientResponse.filterStatusOk),
+                Effect.flatMap(HttpClientResponse.schemaBodyJson(PromptSuggestions.Response)),
+              )
+          }).pipe(
+            Effect.scoped,
+            Effect.timeout(Duration.seconds(18)),
+            Effect.orElseSucceed(() => ({ text: null })),
+          ),
+      })
+      .pipe(Effect.orDie)
+
     yield* ctx.integration.transform((editor) => {
       editor.update("opencode", (integration) => {
         integration.name = "OpenCode"
@@ -490,6 +537,8 @@ export const OpencodePlugin = define<
       })
     })
     yield* ctx.model.transform((models) => {
+      // An older Console configuration may still advertise the prototype alias as a chat model.
+      models.remove(Provider.ID.opencode, "persimmon-autocomplete")
       const item = models.provider.get(Provider.ID.opencode)
       if (!item) return
       const hasKey = Boolean(
@@ -611,8 +660,15 @@ function fetchConfig(http: HttpClient.HttpClient, value: Credential.Key | Creden
           const watches = response.headers[OpencodeWatches.header] !== undefined
           const lists = response.headers[listsHeader] !== undefined
           const artifacts = response.headers[OpencodeArtifacts.header] !== undefined
+          const promptSuggestions = response.headers[suggestionsHeader] === "1"
           const body = yield* HttpClientResponse.filterStatusOk(response).pipe(Effect.flatMap((ok) => ok.json))
-          return { ...(yield* Schema.decodeUnknownEffect(ConfigIntegration.Remote)(body)), watches, lists, artifacts }
+          return {
+            ...(yield* Schema.decodeUnknownEffect(ConfigIntegration.Remote)(body)),
+            watches,
+            lists,
+            artifacts,
+            promptSuggestions,
+          }
         }),
       ),
       Effect.scoped,

@@ -71,7 +71,7 @@ import { useWorkingDirectoryActions } from "../../ui/working-directory-actions"
 import { truncateFilePath } from "../../ui/file-path"
 import { PromptMetadataRow } from "./metadata"
 import { limitLabel, useUsageLimits } from "../usage"
-import { createSuggestion, latestReply, suggestionModel } from "./suggestion"
+import { createSuggestion, latestReply } from "./suggestion"
 
 export type PromptProps = {
   sessionID?: string
@@ -257,27 +257,26 @@ export function Prompt(props: PromptProps) {
   })
   const editorContextLabelState = createMemo(() => editor.labelState())
   const [auto, setAuto] = createSignal<AutocompleteRef>()
-  const suggestionsAvailable = createMemo(
-    () =>
-      config.experimental?.["prompt-suggestions"] !== false &&
-      data.location.model
-        .list()
-        ?.some(
-          (model) =>
-            model.enabled && model.providerID === suggestionModel.providerID && model.id === suggestionModel.id,
-        ),
-  )
   const suggestionExchange = createMemo(
     () => {
       const sessionID = props.sessionID
-      if (!suggestionsAvailable() || !sessionID || disabled() || props.visible === false || status() !== "idle") return
-      if (data.session.get(sessionID)?.revert || data.session.pending.list(sessionID).length) return
+      if (config.experimental?.["prompt-suggestions"] === false || !sessionID) return
+      if (disabled() || props.visible === false || status() !== "idle") return
+      const session = data.session.get(sessionID)
+      if (!session || session.revert || data.session.pending.list(sessionID).length) return
       if (data.session.permission.list(sessionID)?.length || data.session.form.list(sessionID)?.length) return
+      const console = data.location.integration.list(session.location)?.find((item) => item.id === "opencode")
+      if (!console?.connections.length) return
       const replyID = latestReply(data.session.message.list(sessionID))
-      if (replyID) return { sessionID, replyID }
+      if (replyID) return { sessionID, replyID, directory: session.location.directory }
     },
     undefined,
-    { equals: (previous, next) => previous?.sessionID === next?.sessionID && previous?.replyID === next?.replyID },
+    {
+      equals: (previous, next) =>
+        previous?.sessionID === next?.sessionID &&
+        previous?.replyID === next?.replyID &&
+        previous?.directory === next?.directory,
+    },
   )
   const suggestedPrompt = createSuggestion(client.api, suggestionExchange)
   const move = usePromptMove({

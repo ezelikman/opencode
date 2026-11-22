@@ -1,12 +1,16 @@
 import type { OpenCodeClient, SessionMessageInfo } from "@opencode/client"
+import { PromptSuggestions } from "@opencode/schema/prompt-suggestions"
 import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js"
 
-export const suggestionModel = { providerID: "opencode", id: "persimmon-autocomplete" }
-
-type Exchange = { sessionID: string; replyID: string }
+type Exchange = { sessionID: string; replyID: string; directory: string }
 
 function sameExchange(first?: Exchange, second?: Exchange) {
-  return first !== undefined && first.sessionID === second?.sessionID && first.replyID === second.replyID
+  return (
+    first !== undefined &&
+    first.sessionID === second?.sessionID &&
+    first.replyID === second.replyID &&
+    first.directory === second.directory
+  )
 }
 
 export function latestReply(messages: readonly SessionMessageInfo[]) {
@@ -43,6 +47,10 @@ export function createSuggestion(client: OpenCodeClient, exchange: Accessor<Exch
 }
 
 async function predict(client: OpenCodeClient, exchange: Exchange, signal: AbortSignal) {
+  const rpc = client.rpc(PromptSuggestions.Definition)
+  const options = { location: { directory: exchange.directory }, signal }
+  if (!(await rpc.available({}, options))) return
+
   const messages: SessionMessageInfo[] = []
   let cursor: string | undefined
   do {
@@ -55,19 +63,14 @@ async function predict(client: OpenCodeClient, exchange: Exchange, signal: Abort
   } while (cursor)
   if (latestReply(messages) !== exchange.replyID) return
 
-  const turns = messages.flatMap((message) => {
+  const turns = messages.flatMap<(typeof PromptSuggestions.Request.Type)["turns"][number]>((message) => {
     if (message.type === "user" && message.text.trim()) return [{ name: "User", content: message.text }]
     if (message.type !== "assistant") return []
     const content = message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
     return content.trim() ? [{ name: "Coding assistant", content }] : []
   })
-  // The Console's dedicated model receives the transcript as JSON in one user message.
-  // Its gateway adapter uses the names as Persimmon participants and predicts the User.
-  const result = await client.experimental.generate.text(
-    { model: suggestionModel, prompt: JSON.stringify({ turns }) },
-    { signal },
-  )
-  const text = result.text.trim()
+  const result = await rpc.predict({ turns }, options)
+  const text = result.text?.trim()
   if (!text || /^NO_SUGGESTION$/i.test(text) || /^[!/]/.test(text)) return
   if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(text) || Array.from(text).length > 200) return
   return text

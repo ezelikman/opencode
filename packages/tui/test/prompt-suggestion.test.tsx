@@ -4,7 +4,6 @@ import { directory, json } from "./fixture/tui-client"
 
 test("offers a Console suggestion from the full conversation and inserts it without submitting", async () => {
   const location = { directory, project: { id: "proj_test", directory, canonical: directory } }
-  const model = { providerID: "opencode", id: "persimmon-autocomplete" }
   const session = {
     id: "ses_suggestion",
     projectID: "proj_test",
@@ -28,10 +27,11 @@ test("offers a Console suggestion from the full conversation and inserts it with
   })
   const first = [user("msg_1", "Use a dry run"), reply("msg_2", "I will use one")]
   const recent = [user("msg_3", "What is next?"), reply("msg_4", "Should I run the checks?")]
-  const requests: { model: unknown; prompt: string }[] = []
+  const requests: unknown[] = []
   const generated = Promise.withResolvers<void>()
   let submitted = 0
-  let advertised = false
+  let codingCalls = 0
+  let connected = false
   const suggestion = "Yes, run the dry-run checks."
   await using setup = await createAppFixture({
     width: 100,
@@ -52,12 +52,29 @@ test("offers a Console suggestion from the full conversation and inserts it with
           cursor: {},
         })
       }
-      if (url.pathname === "/api/model")
-        return json({ location, data: advertised ? [{ ...model, enabled: true }] : [] })
-      if (url.pathname === "/api/experimental/generate/text") {
+      if (url.pathname === "/api/integration")
+        return json({
+          location,
+          data: [
+            {
+              id: "opencode",
+              name: "OpenCode Console",
+              methods: [],
+              connections: connected
+                ? [{ type: "credential", id: "cred_console", label: "Console", method: "key" }]
+                : [],
+            },
+          ],
+        })
+      if (url.pathname === "/api/rpc/opencode.prompt-suggestions/available") return json({ output: true })
+      if (url.pathname === "/api/rpc/opencode.prompt-suggestions/predict") {
         requests.push(await request.json())
         generated.resolve()
-        return json({ data: { text: suggestion } })
+        return json({ output: { text: suggestion } })
+      }
+      if (url.pathname === "/api/experimental/generate/text") {
+        codingCalls++
+        return json({ data: { text: "Unexpected coding call" } })
       }
       return undefined
     },
@@ -66,28 +83,30 @@ test("offers a Console suggestion from the full conversation and inserts it with
   await setup.ready
   await setup.waitForFrame((frame) => frame.includes("Should I run the checks?"))
   expect(requests).toHaveLength(0)
-  advertised = true
+  connected = true
   setup.events.emit({
-    id: "evt_suggestion_model",
+    id: "evt_suggestion_connection",
     created: 1,
-    type: "model.updated",
+    type: "integration.updated",
     location: { directory },
     data: {},
   })
   await generated.promise
   await setup.waitForFrame((frame) => frame.includes("[Right] " + suggestion))
   expect(requests).toHaveLength(1)
-  expect(requests[0].model).toEqual(model)
-  expect(JSON.parse(requests[0].prompt)).toEqual({
-    turns: [
-      { name: "User", content: "Use a dry run" },
-      { name: "Coding assistant", content: "I will use one" },
-      { name: "User", content: "What is next?" },
-      { name: "Coding assistant", content: "Should I run the checks?" },
-    ],
+  expect(requests[0]).toEqual({
+    input: {
+      turns: [
+        { name: "User", content: "Use a dry run" },
+        { name: "Coding assistant", content: "I will use one" },
+        { name: "User", content: "What is next?" },
+        { name: "Coding assistant", content: "Should I run the checks?" },
+      ],
+    },
   })
 
   setup.mockInput.pressArrow("right")
   await setup.waitForFrame((frame) => frame.includes(suggestion) && !frame.includes("[Right] " + suggestion))
   expect(submitted).toBe(0)
+  expect(codingCalls).toBe(0)
 })

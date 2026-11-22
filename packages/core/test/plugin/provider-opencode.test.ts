@@ -4,6 +4,7 @@ import { LLMClient, RequestExecutor } from "@opencode/ai/route"
 import { Document, Event, Info } from "@opencode/schema/config"
 import { ConfigPolicy } from "@opencode/schema/config/policy"
 import { Money } from "@opencode/schema/money"
+import { PromptSuggestions } from "@opencode/schema/prompt-suggestions"
 import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
@@ -26,6 +27,7 @@ import { PluginHost } from "@opencode/core/plugin/host"
 import { OpenAIPlugin } from "@opencode/core/plugin/provider/openai"
 import { OpencodePlugin } from "@opencode/core/plugin/provider/opencode"
 import { Provider } from "@opencode/core/provider"
+import { Rpc } from "@opencode/core/rpc"
 import { Session } from "@opencode/core/session"
 import { Skill } from "@opencode/core/skill"
 import { WebSearch } from "@opencode/core/websearch"
@@ -143,6 +145,66 @@ const cost = (input: number, output = 0) => [
 ]
 
 describe("OpencodePlugin", () => {
+  it.effect("routes prompt suggestions separately and keeps Persimmon out of the model catalog", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      const providers = yield* Provider.Service
+      const models = yield* Model.Service
+      const rpc = yield* Rpc.Service
+      const persimmon = Model.ID.make("persimmon-autocomplete")
+      const coding = Model.ID.make("coding-model")
+      const input = { turns: [{ name: "Coding assistant", content: "Should I run the checks?" }] }
+      const requests: unknown[] = []
+      const state = { suggestions: true }
+      const server = {
+        fetch: async (request: Request) => {
+          const pathname = new URL(request.url).pathname
+          if (pathname === "/api/v2/config")
+            return Response.json(
+              { providers: {} },
+              { headers: { "x-opencode-prompt-suggestions": state.suggestions ? "1" : "0" } },
+            )
+          if (pathname === "/api/v2/prompt-suggestions" && request.method === "POST") {
+            expect(request.headers.get("authorization")).toBe("Bearer console-key")
+            expect(request.headers.get("x-org-id")).toBe("org_test")
+            requests.push(await request.json())
+            return Response.json({ text: "Yes, run the checks." })
+          }
+          return new Response(null, { status: 404 })
+        },
+      }
+      yield* credentials.create({
+        integrationID: Integration.ID.make("opencode"),
+        value: Credential.Key.make({
+          type: "key",
+          key: "console-key",
+          metadata: { server: "https://console.test", orgID: "org_test" },
+        }),
+      })
+      yield* providers.transform((editor) => {
+        editor.update(Provider.ID.opencode, () => {})
+        editor.models.update(Provider.ID.opencode, persimmon, () => {})
+        editor.models.update(Provider.ID.opencode, coding, () => {})
+      })
+      yield* addPlugin().pipe(inProcess(server))
+      expect(yield* models.get(Provider.ID.opencode, persimmon)).toBeUndefined()
+      expect((yield* models.available()).map((model) => model.id)).not.toContain(persimmon)
+      expect((yield* models.default())?.id).toBe(coding)
+      expect(yield* rpc.call(PromptSuggestions.Definition.id, "available", {})).toBe(true)
+      expect(yield* rpc.call(PromptSuggestions.Definition.id, "predict", input)).toEqual({
+        text: "Yes, run the checks.",
+      })
+      expect(requests).toEqual([input])
+
+      state.suggestions = false
+      yield* TestClock.adjust("1 minute")
+      yield* drain
+      expect(yield* rpc.call(PromptSuggestions.Definition.id, "available", {})).toBe(false)
+      expect(yield* rpc.call(PromptSuggestions.Definition.id, "predict", input)).toEqual({ text: null })
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
   it.effect("registers account and service account methods", () =>
     Effect.gen(function* () {
       yield* addPlugin()
