@@ -24,7 +24,14 @@ test("authorizes first and rejects invalid input before contacting Persimmon", a
   expect((await denied(request({}))).status).toBe(403)
   const route = promptSuggestions({ ...options, authorize: () => undefined })
   expect((await route(request({}, "GET"))).status).toBe(405)
-  for (const input of [null, { turns: [] }, { turns: [{ name: "Tool", content: "output" }] }])
+  for (const input of [
+    null,
+    { turns: [] },
+    { turns: [{ name: "Tool", content: "output" }] },
+    { ...transcript, priorPrompts: [["x".repeat(513)]] },
+    { ...transcript, priorPrompts: [["a", "b", "c", "d"]] },
+    { ...transcript, priorPrompts: [["a"], ["b"], ["c"], ["d"]] },
+  ])
     expect((await route(request(input))).status).toBe(400)
 })
 
@@ -42,7 +49,12 @@ test("sends all turns in order and requests only the user's next turn", async ()
       expect(init.headers).toEqual({ authorization: "Bearer service-key", "content-type": "application/json" })
       expect(init.redirect).toBe("error")
       expect(JSON.parse(String(init.body))).toEqual({
-        turns: [{ name: "User", content: prefix }, { name: "User", content: "tail" }, ...transcript.turns],
+        turns: [
+          { name: "Earlier conversations", content: JSON.stringify([["Use dry runs."], ["Ask before committing."]]) },
+          { name: "User", content: prefix },
+          { name: "User", content: "tail" },
+          ...transcript.turns,
+        ],
         speaker: "User",
         tier: "standard",
         max_tokens: 96,
@@ -50,7 +62,12 @@ test("sends all turns in order and requests only the user's next turn", async ()
       return Response.json({ finish_reason: "stop", content: "Yes, please." })
     },
   })
-  const result = await route(request({ turns: [{ name: "User", content: prefix + "tail" }, ...transcript.turns] }))
+  const result = await route(
+    request({
+      turns: [{ name: "User", content: prefix + "tail" }, ...transcript.turns],
+      priorPrompts: [["Use dry runs."], ["Ask before committing."]],
+    }),
+  )
   expect(result.status).toBe(200)
   expect(result.headers.get("cache-control")).toBe("no-store")
   expect(await result.json()).toEqual({ text: "Yes, please." })

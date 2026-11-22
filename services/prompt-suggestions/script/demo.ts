@@ -82,40 +82,52 @@ try {
   const sessionID = "ses_suggestions_demo"
   const sessionFile = path.join(root, "session.json")
   const model = { id: "demo", providerID: "demo" }
+  const info = {
+    id: sessionID,
+    projectID: "global",
+    location: { directory: root },
+    title: "Persimmon autocomplete demo",
+    time: { created: 1, updated: 4 },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  }
+  const messages = [
+    { id: "msg_1", type: "user", text: "Use dry-run mode and the label TEAL-2841.", time: { created: 1 } },
+    {
+      id: "msg_2",
+      type: "assistant",
+      agent: "build",
+      model,
+      content: [{ type: "text", text: "I have the label and will use dry-run mode." }],
+      time: { created: 2, completed: 2 },
+    },
+    { id: "msg_3", type: "user", text: "What is next?", time: { created: 3 } },
+    {
+      id: "msg_4",
+      type: "assistant",
+      agent: "build",
+      model,
+      content: [{ type: "text", text: "Shall I run the validation with your earlier settings?" }],
+      time: { created: 4, completed: 4 },
+    },
+  ]
+  const previous = ["Run the CLI smoke test first.", "Show me a dry run before changing files."]
+  for (const [index, text] of previous.entries()) {
+    const id = "ses_demo_prior_" + index
+    await Bun.write(
+      sessionFile,
+      JSON.stringify({
+        info: { ...info, id, title: "Previous validation chat" },
+        messages: [{ id: "msg_demo_prior_" + index, type: "user", text, time: { created: 1 } }],
+      }),
+    )
+    await run(["session", "import", sessionFile, "--directory", root])
+  }
   await Bun.write(
-    sessionFile,
-    JSON.stringify({
-      info: {
-        id: sessionID,
-        projectID: "global",
-        location: { directory: root },
-        title: "Persimmon autocomplete demo",
-        time: { created: 1, updated: 4 },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      },
-      messages: [
-        { id: "msg_1", type: "user", text: "Use dry-run mode and the label TEAL-2841.", time: { created: 1 } },
-        {
-          id: "msg_2",
-          type: "assistant",
-          agent: "build",
-          model,
-          content: [{ type: "text", text: "I have the label and will use dry-run mode." }],
-          time: { created: 2, completed: 2 },
-        },
-        { id: "msg_3", type: "user", text: "What is next?", time: { created: 3 } },
-        {
-          id: "msg_4",
-          type: "assistant",
-          agent: "build",
-          model,
-          content: [{ type: "text", text: "Shall I run the validation with your earlier settings?" }],
-          time: { created: 4, completed: 4 },
-        },
-      ],
-    }),
+    path.join(root, "opencode", "prompt-history.jsonl"),
+    previous.map((text) => JSON.stringify({ text, mode: "normal", pasted: [] })).join("\n") + "\n",
   )
+  await Bun.write(sessionFile, JSON.stringify({ info, messages }))
   await run(["session", "import", sessionFile, "--directory", root])
   await run([root, "--session", sessionID])
 } finally {

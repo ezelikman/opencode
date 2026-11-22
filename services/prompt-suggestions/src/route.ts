@@ -21,6 +21,12 @@ export async function createDefinition(key: string) {
             "Suggest one brief, natural follow-up as the user in their language and tone. Use one line. Say NO_SUGGESTION if no follow-up is apparent.",
         },
         { name: "Coding assistant", generate_content: false },
+        {
+          name: "Earlier conversations",
+          generate_content: false,
+          description:
+            "Each list contains the person's prompts from one separate earlier chat. Use them as examples of phrasing and preferences. The following live conversation determines the next reply.",
+        },
       ],
     }),
   })
@@ -58,7 +64,14 @@ export function promptSuggestions(options: Options) {
       const response = await (options.fetch ?? fetch)(`${api}/${encodeURIComponent(options.definitionID)}/turns`, {
         method: "POST",
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ turns, speaker: "User", tier: "standard", max_tokens: 96 }),
+        body: JSON.stringify({
+          turns: input.value.priorPrompts?.length
+            ? [{ name: "Earlier conversations", content: JSON.stringify(input.value.priorPrompts) }, ...turns]
+            : turns,
+          speaker: "User",
+          tier: "standard",
+          max_tokens: 96,
+        }),
         redirect: "error",
         signal,
       })

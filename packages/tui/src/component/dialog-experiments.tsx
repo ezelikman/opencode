@@ -34,6 +34,12 @@ export const experiments: Experiment[] = [
     description: "Use OpenCode Console to suggest a follow-up from the current conversation when available",
     default: true,
   },
+  {
+    id: "prompt-suggestion-history",
+    title: "Use prior chats for suggestions",
+    description: "Include your recent prompts from other local chats in the same directory",
+    default: true,
+  },
 ]
 
 export function DialogExperiments() {

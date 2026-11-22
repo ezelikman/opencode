@@ -268,14 +268,22 @@ export function Prompt(props: PromptProps) {
       const console = data.location.integration.list(session.location)?.find((item) => item.id === "opencode")
       if (!console?.connections.length) return
       const replyID = latestReply(data.session.message.list(sessionID))
-      if (replyID) return { sessionID, replyID, directory: session.location.directory }
+      if (replyID)
+        return {
+          sessionID,
+          replyID,
+          directory: session.location.directory,
+          includeHistory:
+            terminalEnvironment.localServer === true && config.experimental?.["prompt-suggestion-history"] !== false,
+        }
     },
     undefined,
     {
       equals: (previous, next) =>
         previous?.sessionID === next?.sessionID &&
         previous?.replyID === next?.replyID &&
-        previous?.directory === next?.directory,
+        previous?.directory === next?.directory &&
+        previous?.includeHistory === next?.includeHistory,
     },
   )
   const suggestedPrompt = createSuggestion(client.api, suggestionExchange)

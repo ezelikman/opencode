@@ -1,6 +1,6 @@
 import path from "path"
 import { measureEditText, type WidthMethod } from "@opentui/core"
-import { onMount } from "solid-js"
+import { createSignal, onMount } from "solid-js"
 import { createStore, produce, unwrap } from "solid-js/store"
 import type { PromptInput } from "@opencode/schema"
 import type { Types } from "effect"
@@ -102,9 +102,11 @@ const { use: useHistoryEntries, provider: PromptHistoryProvider } = createSimple
   init: () => {
     const paths = useTuiPaths()
     const historyPath = path.join(paths.state, "prompt-history.jsonl")
+    const [loaded, setLoaded] = createSignal(false)
     onMount(async () => {
       const lines = parsePromptHistory(await readText(historyPath).catch(() => ""))
       setStore("history", lines)
+      setLoaded(true)
 
       // Rewrite valid retained entries to self-heal corruption and enforce the limit.
       if (lines.length > 0)
@@ -114,6 +116,7 @@ const { use: useHistoryEntries, provider: PromptHistoryProvider } = createSimple
     const [store, setStore] = createStore({ history: [] as PromptInfo[] })
 
     return {
+      loaded,
       get entries() {
         return store.history
       },
@@ -141,7 +144,7 @@ const { use: useHistoryEntries, provider: PromptHistoryProvider } = createSimple
   },
 })
 
-export { PromptHistoryProvider }
+export { PromptHistoryProvider, useHistoryEntries }
 
 export function usePromptHistory(currentDraft = emptyPrompt) {
   const history = useHistoryEntries()

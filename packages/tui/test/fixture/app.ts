@@ -12,6 +12,7 @@ export async function createAppFixture(
     width?: number
     height?: number
     state?: string
+    localServer?: boolean
     config?: Config.Info
     args?: TuiInput["args"]
     fetch?: FetchHandler
@@ -46,7 +47,7 @@ export async function createAppFixture(
   const task = Effect.runPromise(
     run({
       app: { name: "test", version: "test", channel: "test" },
-      server: { endpoint: { url: server.url.toString() } },
+      server: { endpoint: { url: server.url.toString() }, local: input.localServer },
       config: {
         get: async () => config,
         update: async (mutate) => {
